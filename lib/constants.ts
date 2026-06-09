@@ -17,6 +17,19 @@ const pexels = (id: number) =>
 
 export const PLACEHOLDER_EVENT_IMAGE = pexels(209948);
 
+export const DEMO_ACCOUNTS = {
+  admin: {
+    label: "Admin",
+    email: "admin@dancesphere.com",
+    password: "Admin123!",
+  },
+  organizer: {
+    label: "Organizer",
+    email: "organizer@dancesphere.com",
+    password: "Org123!",
+  },
+} as const;
+
 /** Seed / default images keyed by event slug */
 export const EVENT_IMAGES: Record<string, string> = {
   "salsa-night-barcelona": pexels(209948),

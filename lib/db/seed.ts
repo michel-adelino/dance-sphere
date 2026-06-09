@@ -2,11 +2,123 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 dotenv.config();
 
+import { hashPassword } from "better-auth/crypto";
+import { and, eq } from "drizzle-orm";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { nanoid } from "nanoid";
 import { EVENT_IMAGES } from "@/lib/constants";
 import * as schema from "./schema";
+
+const SEED_USERS = [
+  {
+    email: "admin@dancesphere.com",
+    password: "Admin123!",
+    firstName: "Admin",
+    lastName: "User",
+    name: "Admin User",
+    role: "admin" as const,
+  },
+  {
+    email: "organizer@dancesphere.com",
+    password: "Org123!",
+    firstName: "Maria",
+    lastName: "Garcia",
+    name: "Maria Garcia",
+    role: "organizer" as const,
+  },
+];
+
+async function ensureSeedUser(
+  db: ReturnType<typeof drizzle>,
+  user: (typeof SEED_USERS)[number]
+) {
+  const normalizedEmail = user.email.toLowerCase();
+  const now = new Date();
+  const hashedPassword = await hashPassword(user.password);
+
+  const existingUser = await db
+    .select()
+    .from(schema.user)
+    .where(eq(schema.user.email, normalizedEmail))
+    .limit(1);
+
+  let userId: string;
+
+  if (existingUser.length > 0) {
+    userId = existingUser[0].id;
+    await db
+      .update(schema.user)
+      .set({ name: user.name, updatedAt: now })
+      .where(eq(schema.user.id, userId));
+  } else {
+    userId = nanoid();
+    await db.insert(schema.user).values({
+      id: userId,
+      name: user.name,
+      email: normalizedEmail,
+      emailVerified: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  const existingProfile = await db
+    .select()
+    .from(schema.profiles)
+    .where(eq(schema.profiles.id, userId))
+    .limit(1);
+
+  if (existingProfile.length > 0) {
+    await db
+      .update(schema.profiles)
+      .set({
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: normalizedEmail,
+        role: user.role,
+      })
+      .where(eq(schema.profiles.id, userId));
+  } else {
+    await db.insert(schema.profiles).values({
+      id: userId,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: normalizedEmail,
+      role: user.role,
+    });
+  }
+
+  const existingAccount = await db
+    .select()
+    .from(schema.account)
+    .where(
+      and(
+        eq(schema.account.userId, userId),
+        eq(schema.account.providerId, "credential")
+      )
+    )
+    .limit(1);
+
+  if (existingAccount.length > 0) {
+    await db
+      .update(schema.account)
+      .set({ password: hashedPassword, updatedAt: now })
+      .where(eq(schema.account.id, existingAccount[0].id));
+  } else {
+    await db.insert(schema.account).values({
+      id: nanoid(),
+      accountId: userId,
+      providerId: "credential",
+      userId,
+      password: hashedPassword,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  return userId;
+}
 
 async function seed() {
   if (!process.env.DATABASE_URL) {
@@ -17,46 +129,16 @@ async function seed() {
   const sql = neon(process.env.DATABASE_URL);
   const db = drizzle(sql, { schema });
 
-  const adminId = nanoid();
-  const organizerId = nanoid();
-
   console.log("Seeding database...");
 
-  await db.insert(schema.user).values([
-    {
-      id: adminId,
-      name: "Admin User",
-      email: "admin@dancesphere.com",
-      emailVerified: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-    {
-      id: organizerId,
-      name: "Maria Garcia",
-      email: "organizer@dancesphere.com",
-      emailVerified: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-  ]);
+  const adminId = await ensureSeedUser(db, SEED_USERS[0]);
+  const organizerId = await ensureSeedUser(db, SEED_USERS[1]);
 
-  await db.insert(schema.profiles).values([
-    {
-      id: adminId,
-      firstName: "Admin",
-      lastName: "User",
-      email: "admin@dancesphere.com",
-      role: "admin",
-    },
-    {
-      id: organizerId,
-      firstName: "Maria",
-      lastName: "Garcia",
-      email: "organizer@dancesphere.com",
-      role: "organizer",
-    },
-  ]);
+  const existingEvents = await db
+    .select({ slug: schema.events.slug })
+    .from(schema.events);
+
+  const existingSlugs = new Set(existingEvents.map((e) => e.slug));
 
   const events = [
     {
@@ -169,12 +251,17 @@ async function seed() {
     },
   ];
 
-  await db.insert(schema.events).values(events);
+  const newEvents = events.filter((e) => !existingSlugs.has(e.slug));
+  if (newEvents.length > 0) {
+    await db.insert(schema.events).values(newEvents);
+  }
 
   console.log("Seed complete!");
-  console.log("Admin: admin@dancesphere.com (register via app to set password)");
-  console.log("Organizer: organizer@dancesphere.com");
-  console.log(`Created ${events.length} sample events`);
+  console.log("Admin:     admin@dancesphere.com / Admin123!");
+  console.log("Organizer: organizer@dancesphere.com / Org123!");
+  console.log(
+    `Events: ${newEvents.length} created, ${existingSlugs.size} already existed`
+  );
   process.exit(0);
 }
 

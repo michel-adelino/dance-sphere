@@ -83,7 +83,14 @@ Use Stripe test card `4242 4242 4242 4242`. After payment, Stripe redirects to `
 | Organizer | Dashboard, event CRUD, participants |
 | Admin | All organizer access + admin panel |
 
-The first registered user automatically becomes an admin. Use the homepage CTA to become an organizer.
+After running `npm run db:seed`, you can log in with:
+
+| Role | Email | Password |
+|------|-------|----------|
+| Admin | `admin@dancesphere.com` | `Admin123!` |
+| Organizer | `organizer@dancesphere.com` | `Org123!` |
+
+The first registered user also automatically becomes an admin if no seed accounts exist.
 
 ## Documentation
 
